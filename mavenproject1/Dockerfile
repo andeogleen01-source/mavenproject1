@@ -1,4 +1,4 @@
-# Stage 1: Build the Maven application with Java 21 override
+# Stage 1: Build the Maven application with Java 21 override and main class
 FROM maven:3.9.6-eclipse-temurin-21 AS build
 WORKDIR /app
 COPY . .
@@ -9,4 +9,4 @@ FROM eclipse-temurin:21-jdk-jammy
 WORKDIR /app
 COPY --from=build /app/target/mavenproject1-1.0-SNAPSHOT.jar app.jar
 EXPOSE 7070
-CMD ["java", "-jar", "app.jar"]
+CMD ["java", "-cp", "app.jar", "com.madnesscreator.mavenproject1.KioskRelayServer"]
