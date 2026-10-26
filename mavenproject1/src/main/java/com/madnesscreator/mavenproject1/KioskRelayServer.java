@@ -1,15 +1,20 @@
 package com.madnesscreator.mavenproject1;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URLDecoder;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class KioskRelayServer {
     
-    // Read Render's assigned port from the environment, default to 7070 for local testing
     private static final int PORT = getPort();
+    private static final ConcurrentHashMap<String, String> activeBranches = new ConcurrentHashMap<>();
 
     private static int getPort() {
         String envPort = System.getenv("PORT");
@@ -17,30 +22,24 @@ public class KioskRelayServer {
             try {
                 return Integer.parseInt(envPort);
             } catch (NumberFormatException e) {
-                System.err.println("Invalid PORT environment variable. Falling back to 7070.");
+                System.err.println("Invalid PORT. Falling back to 7070.");
             }
         }
         return 7070;
     }
 
     public static void main(String[] args) {
-        System.out.println("Starting Kiosk Cloud Relay Server...");
-        
-        // Thread pool to handle concurrent Admin Control Center and remote kiosk connections
+        System.out.println("Starting Kiosk Cloud Relay Server on port " + PORT);
         ExecutorService pool = Executors.newCachedThreadPool();
 
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
-            System.out.println("Kiosk Cloud Relay Server active and listening concurrently on port " + PORT + "...");
+            System.out.println("Relay Server is running successfully!");
 
             while (true) {
                 Socket clientSocket = serverSocket.accept();
-                System.out.println("New client connected: " + clientSocket.getInetAddress());
-                
-                // Hand off the connection to a dedicated worker thread
                 pool.execute(new ClientHandler(clientSocket));
             }
         } catch (IOException e) {
-            System.err.println("Server exception encountered on port " + PORT);
             e.printStackTrace();
         } finally {
             pool.shutdown();
@@ -56,16 +55,64 @@ public class KioskRelayServer {
 
         @Override
         public void run() {
-            try {
-                System.out.println("Handling communication stream for: " + socket.getRemoteSocketAddress());
-            } catch (Exception e) {
-                System.err.println("Error handling client connection: " + e.getMessage());
-            } finally {
-                try {
-                    socket.close();
-                } catch (IOException e) {
-                    // Ignored on close
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                 OutputStream out = socket.getOutputStream()) {
+                
+                String requestLine = reader.readLine();
+                if (requestLine == null || requestLine.isEmpty()) return;
+
+                String clientIp = socket.getInetAddress().getHostAddress();
+                if (clientIp.equals("0.0.0.0") || clientIp.equals("127.0.0.1")) {
+                    clientIp = "Localhost";
                 }
+
+                if (requestLine.contains("/api/register")) {
+                    String branchName = "A&F Kiosk Branch";
+
+                    try {
+                        String[] parts = requestLine.split(" ");
+                        if (parts.length > 1) {
+                            String uri = parts[1];
+                            if (uri.contains("?")) {
+                                String query = uri.split("\\?")[1];
+                                for (String param : query.split("&")) {
+                                    String[] kv = param.split("=");
+                                    if (kv.length == 2) {
+                                        String val = URLDecoder.decode(kv[1], "UTF-8");
+                                        if ("branchName".equals(kv[0])) branchName = val;
+                                        if ("clientIp".equals(kv[0]) && !val.isEmpty()) clientIp = val;
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {}
+
+                    activeBranches.put(clientIp, branchName);
+
+                    String httpResponse = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nOK";
+                    out.write(httpResponse.getBytes());
+
+                } else if (requestLine.contains("/api/branches")) {
+                    StringBuilder json = new StringBuilder("[");
+                    int i = 0;
+                    for (ConcurrentHashMap.Entry<String, String> entry : activeBranches.entrySet()) {
+                        if (i > 0) json.append(",");
+                        json.append("{\"branchName\":\"").append(entry.getValue())
+                            .append("\",\"clientIp\":\"").append(entry.getKey()).append("\"}");
+                        i++;
+                    }
+                    json.append("]");
+
+                    String httpResponse = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n" + json.toString();
+                    out.write(httpResponse.getBytes());
+                } else {
+                    String httpResponse = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nAlive";
+                    out.write(httpResponse.getBytes());
+                }
+
+            } catch (Exception ignored) {
+            } finally {
+                try { socket.close(); } catch (IOException ignored) {}
             }
         }
     }
