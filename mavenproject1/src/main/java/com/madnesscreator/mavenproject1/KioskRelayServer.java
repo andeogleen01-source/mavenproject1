@@ -14,7 +14,19 @@ import java.util.concurrent.Executors;
 public class KioskRelayServer {
     
     private static final int PORT = getPort();
-    private static final ConcurrentHashMap<String, String> activeBranches = new ConcurrentHashMap<>();
+    
+    // Store branch info along with the last heartbeat timestamp
+    private static final ConcurrentHashMap<String, BranchInfo> activeBranches = new ConcurrentHashMap<>();
+
+    private static class BranchInfo {
+        String branchName;
+        long lastSeen;
+
+        BranchInfo(String branchName, long lastSeen) {
+            this.branchName = branchName;
+            this.lastSeen = lastSeen;
+        }
+    }
 
     private static int getPort() {
         String envPort = System.getenv("PORT");
@@ -87,17 +99,23 @@ public class KioskRelayServer {
                         }
                     } catch (Exception ignored) {}
 
-                    activeBranches.put(clientIp, branchName);
+                    // Update branch with current timestamp
+                    activeBranches.put(clientIp, new BranchInfo(branchName, System.currentTimeMillis()));
 
                     String httpResponse = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nOK";
                     out.write(httpResponse.getBytes());
 
                 } else if (requestLine.contains("/api/branches")) {
+                    long currentTime = System.currentTimeMillis();
+                    
+                    // Remove branches that haven't sent a heartbeat in the last 15 seconds
+                    activeBranches.entrySet().removeIf(entry -> (currentTime - entry.getValue().lastSeen) > 15000);
+
                     StringBuilder json = new StringBuilder("[");
                     int i = 0;
-                    for (ConcurrentHashMap.Entry<String, String> entry : activeBranches.entrySet()) {
+                    for (ConcurrentHashMap.Entry<String, BranchInfo> entry : activeBranches.entrySet()) {
                         if (i > 0) json.append(",");
-                        json.append("{\"branchName\":\"").append(entry.getValue())
+                        json.append("{\"branchName\":\"").append(entry.getValue().branchName)
                             .append("\",\"clientIp\":\"").append(entry.getKey()).append("\"}");
                         i++;
                     }
