@@ -1,10 +1,6 @@
-Hi po! Available po sa A & F Computer Store  😊
-
-
-✅ Brand New
-✅ With Warranty
-✅ Official Receipt Available
-📍 Novaliches • Fairview • Angeles City
-📞 Contact: 0908 569 0290
-🛵 Delivery available via Lalamove / LBC
-PM, call, or text us po for stock confirmation. Thank you!
+FROM eclipse-temurin:21-jdk-jammy
+WORKDIR /app
+COPY . .
+RUN ./mvnw clean package -DskipTests || mvn clean package -DskipTests
+EXPOSE 7070
+CMD ["java", "-jar", "target/mavenproject1-1.0-SNAPSHOT.jar"]
